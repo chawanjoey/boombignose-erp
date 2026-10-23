@@ -4,7 +4,11 @@ const edition = process.env.BBN_EDITION ?? "community"
 if (edition !== "community" && edition !== "pro") throw new Error("BBN_EDITION must be community or pro")
 
 const nextConfig: NextConfig = {
-  typescript: { tsconfigPath: edition === "pro" ? "tsconfig.pro.json" : "tsconfig.json" },
+  output: "standalone",
+  typescript: {
+    tsconfigPath: edition === "pro" ? "tsconfig.pro.json" : "tsconfig.json",
+    ignoreBuildErrors: process.env.DOCKER_SKIP_TYPECHECK === "1",
+  },
   // Pin the workspace root to this project. A stray lockfile in a parent
   // directory can otherwise make Next infer the wrong root.
   turbopack: {
