@@ -34,6 +34,35 @@ async function pick(page: Page, kind: string) {
   return target.key
 }
 
+async function visibleRecordPixels(page: Page, keys: string[]): Promise<number[]> {
+  const host = page.getByTestId("erp3d-scene")
+  const targets = JSON.parse((await host.getAttribute("data-pick-targets"))!) as { key: string; x: number; y: number }[]
+  const png = (await host.locator("canvas").screenshot()).toString("base64")
+  return page.evaluate(async ({ png, keys, targets }) => {
+    const bytes = Uint8Array.from(atob(png), (char) => char.charCodeAt(0))
+    const image = await createImageBitmap(new Blob([bytes], { type: "image/png" }))
+    const sample = document.createElement("canvas")
+    sample.width = image.width
+    sample.height = image.height
+    const context = sample.getContext("2d")!
+    context.drawImage(image, 0, 0)
+    const pixels = context.getImageData(0, 0, sample.width, sample.height).data
+    const background = [11, 18, 35]
+    return keys.map((key) => {
+      const target = targets.find((item) => item.key === key)!
+      const x = Math.round(target.x * sample.width)
+      const y = Math.round(target.y * sample.height)
+      let contrast = 0
+      for (let dy = -2; dy <= 2; dy++) for (let dx = -2; dx <= 2; dx++) {
+        const offset = ((y + dy) * sample.width + x + dx) * 4
+        const distance = Math.max(...background.map((value, channel) => Math.abs(pixels[offset + channel] - value)))
+        contrast = Math.max(contrast, distance)
+      }
+      return contrast
+    })
+  }, { png, keys, targets })
+}
+
 test("real WebGL pixels, raycast selection and list share the same record", async ({ page }, info) => {
   const errors: string[] = []
   page.on("pageerror", (error) => errors.push(error.message))
@@ -67,6 +96,20 @@ test("real WebGL pixels, raycast selection and list share the same record", asyn
   await expect.poll(async () => Number(await host.getAttribute("data-render-count"))).toBeGreaterThan(frames)
   await page.getByRole("button", { name: "Reset view" }).click()
   await expect.poll(async () => JSON.parse((await host.getAttribute("data-pick-targets"))!)[0].x).toBeCloseTo(initialTargets[0].x, 3)
+  await page.getByRole("button", { name: "Close details" }).click()
+  await expect(host).toHaveAttribute("data-selected-key", "")
+  await host.scrollIntoViewIfNeeded()
+  const target = initialTargets.find((item) => item.key.startsWith("task:"))!
+  const dragBounds = (await canvas.boundingBox())!
+  const dragFrames = Number(await host.getAttribute("data-render-count"))
+  await page.mouse.move(dragBounds.x + dragBounds.width * target.x, dragBounds.y + dragBounds.height * target.y)
+  await page.mouse.down()
+  await page.mouse.move(dragBounds.x + dragBounds.width * target.x + 45, dragBounds.y + dragBounds.height * target.y, { steps: 5 })
+  await expect.poll(async () => Number(await host.getAttribute("data-render-count"))).toBeGreaterThan(dragFrames)
+  await page.mouse.move(dragBounds.x + dragBounds.width * target.x, dragBounds.y + dragBounds.height * target.y, { steps: 5 })
+  await page.mouse.up()
+  await expect(host).toHaveAttribute("data-selected-key", "")
+  await expect(page.getByTestId("erp3d-detail-empty")).toBeVisible()
   await page.screenshot({ path: info.outputPath("webgl-picking.png"), fullPage: true })
   expect(errors).toEqual([])
 })
@@ -129,6 +172,29 @@ test("context loss stops drawing and retry creates one fresh canvas", async ({ p
   await expect(page.getByTestId("erp3d-root")).toHaveAttribute("data-scope", scope!)
   await page.screenshot({ path: info.outputPath("webgl-context.png"), fullPage: true })
 })
+
+for (const retry of [false, true]) for (const closeWith of ["Escape", "Close details"] as const) {
+  test(`context loss ${retry ? "after retry" : "before retry"} returns ${closeWith} focus to the selected row`, async ({ page }) => {
+    const host = await openMap(page)
+    const key = await pick(page, "project")
+    await host.locator("canvas").evaluate((canvas) => (canvas as HTMLCanvasElement).getContext("webgl2")!.getExtension("WEBGL_lose_context")!.loseContext())
+    await expect(host).toHaveAttribute("data-state", "unavailable")
+    if (retry) {
+      await page.getByRole("button", { name: "Try 3D map again" }).click()
+      await expect(host).toHaveAttribute("data-state", "ready")
+    }
+    if (closeWith === "Escape") await page.keyboard.press("Escape")
+    else {
+      const close = page.getByRole("button", { name: "Close details" })
+      await close.focus()
+      await page.keyboard.press("Enter")
+    }
+    const row = page.getByTestId(`erp3d-record-${key}`)
+    await expect(row).toBeFocused()
+    await expect(row).toBeInViewport()
+    await expect(row).toHaveCSS("outline-style", "solid")
+  })
+}
 
 test("idle, hidden and offscreen scene does not keep rendering", async ({ page }, info) => {
   await page.emulateMedia({ reducedMotion: "reduce" })
@@ -195,6 +261,19 @@ test("250 loaded records from four real tables remain selectable with totals abo
     const targets = JSON.parse((await host.getAttribute("data-pick-targets"))!) as { key: string; x: number; y: number }[]
     expect(targets).toHaveLength(250)
     for (const target of targets) { expect(target.x).toBeGreaterThan(0.05); expect(target.x).toBeLessThan(0.95); expect(target.y).toBeGreaterThan(0.05); expect(target.y).toBeLessThan(0.95) }
+    const farTaskKeys = targets.filter((target) => target.key.startsWith("task:")).slice(0, 5).map((target) => target.key)
+    const desktopContrast = await visibleRecordPixels(page, farTaskKeys)
+    for (const contrast of desktopContrast) expect(contrast).toBeGreaterThan(40)
+    await host.locator("canvas").screenshot({ path: info.outputPath("webgl-large-desktop-canvas.png") })
+    await page.screenshot({ path: info.outputPath("webgl-large-desktop.png"), fullPage: true })
+    const beforeResize = Number(await host.getAttribute("data-render-count"))
+    await page.setViewportSize({ width: 375, height: 812 })
+    await page.getByRole("button", { name: "Reset view" }).click()
+    await expect.poll(async () => Number(await host.getAttribute("data-render-count"))).toBeGreaterThan(beforeResize)
+    const mobileContrast = await visibleRecordPixels(page, farTaskKeys)
+    for (const contrast of mobileContrast) expect(contrast).toBeGreaterThan(40)
+    await info.attach("rear-record-pixel-contrast", { body: JSON.stringify({ keys: farTaskKeys, desktopContrast, mobileContrast }), contentType: "application/json" })
+    await host.locator("canvas").screenshot({ path: info.outputPath("webgl-large-mobile-canvas.png") })
     await pick(page, "task")
     await page.screenshot({ path: info.outputPath("webgl-large.png"), fullPage: true })
   } finally {
@@ -213,6 +292,7 @@ test("twenty route visits release their canvas and renderer ownership", async ({
     const host = page.getByTestId("erp3d-scene")
     await expect(host).toHaveAttribute("data-state", "ready")
     await expect(host.locator("canvas")).toHaveCount(1)
+    const oldContext = cycle === 0 ? await host.locator("canvas").evaluateHandle((canvas) => (canvas as HTMLCanvasElement).getContext("webgl2")!) : null
     await expect(page.locator("html")).toHaveAttribute("data-erp3d-active-scenes", "1")
     await page.getByTestId("erp3d-deal-collection").locator("button").first().click()
     await expect(page.getByTestId("erp3d-detail")).toBeVisible()
@@ -220,6 +300,10 @@ test("twenty route visits release their canvas and renderer ownership", async ({
     await expect(page).toHaveURL(/\/dashboard$/)
     await expect(page.locator("html")).toHaveAttribute("data-erp3d-active-scenes", "0")
     await expect(page.locator('canvas[aria-label="Interactive record map"]')).toHaveCount(0)
+    if (oldContext) {
+      await expect.poll(() => oldContext.evaluate((context) => context.isContextLost())).toBe(true)
+      await oldContext.dispose()
+    }
   }
   await page.screenshot({ path: info.outputPath("webgl-lifecycle.png") })
 })

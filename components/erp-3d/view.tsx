@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useMemo, useRef, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { ArrowUpRight, Database, RefreshCw, X } from "lucide-react"
 import { buildRecordGraph, recordHref, recordLabel, type ParentRelation } from "@/lib/erp-3d/graph"
 import type { ErpRecord, ErpSnapshot, RecordKey, RecordKind } from "@/lib/erp-3d/model"
@@ -46,10 +46,12 @@ export function Erp3dView({ snapshot }: { snapshot: ErpSnapshot }) {
     detail?.scrollIntoView({ block: "center", behavior: "auto" })
   }
 
-  function closeDetail() {
+  const closeDetail = useCallback(() => {
+    const origin = originRef.current
+    const row = selectedKey ? document.querySelector<HTMLElement>(`[data-testid="erp3d-record-${selectedKey}"]`) : null
     setSelectedKey(null)
-    originRef.current?.focus()
-  }
+    ;(origin?.isConnected ? origin : row)?.focus()
+  }, [selectedKey])
 
   useEffect(() => {
     if (selectedKey) focusDetail()
@@ -64,7 +66,7 @@ export function Erp3dView({ snapshot }: { snapshot: ErpSnapshot }) {
     }
     window.addEventListener("keydown", onKeyDown)
     return () => window.removeEventListener("keydown", onKeyDown)
-  }, [selectedKey])
+  }, [selectedKey, closeDetail])
 
   return (
     <main data-testid="erp3d-root" data-scope={snapshot.scope.key} className="mx-auto w-full min-w-0 max-w-7xl space-y-6 overflow-x-hidden pb-10">

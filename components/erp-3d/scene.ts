@@ -43,7 +43,6 @@ export function mountRecordScene(host: HTMLElement, graph: RecordGraph, events: 
 
   const scene = new THREE.Scene()
   scene.background = new THREE.Color(0x0b1223)
-  scene.fog = new THREE.Fog(0x0b1223, 28, 65)
   const camera = new THREE.PerspectiveCamera(43, 1, 0.1, 300)
   camera.position.set(0, 18, 29)
   camera.lookAt(0, 0, 0)
@@ -93,7 +92,7 @@ export function mountRecordScene(host: HTMLElement, graph: RecordGraph, events: 
 
   const raycaster = new THREE.Raycaster()
   const pointer = new THREE.Vector2()
-  let down: { x: number; y: number } | null = null
+  let down: { x: number; y: number; dragged: boolean } | null = null
   let disposed = false
   let visible = true
   let raf = 0
@@ -148,13 +147,16 @@ export function mountRecordScene(host: HTMLElement, graph: RecordGraph, events: 
     fitView()
   }
   function onPointerDown(event: PointerEvent) {
-    if (event.button === 0) down = { x: event.clientX, y: event.clientY }
+    if (event.button === 0) down = { x: event.clientX, y: event.clientY, dragged: false }
+  }
+  function onPointerMove(event: PointerEvent) {
+    if (down && Math.hypot(event.clientX - down.x, event.clientY - down.y) > 5) down.dragged = true
   }
   function onPointerUp(event: PointerEvent) {
     if (!down || event.button !== 0) return
-    const moved = Math.hypot(event.clientX - down.x, event.clientY - down.y)
+    const dragged = down.dragged || Math.hypot(event.clientX - down.x, event.clientY - down.y) > 5
     down = null
-    if (moved > 5 || disposed) return
+    if (dragged || disposed) return
     const rect = canvas.getBoundingClientRect()
     pointer.set(((event.clientX - rect.left) / rect.width) * 2 - 1, -((event.clientY - rect.top) / rect.height) * 2 + 1)
     raycaster.setFromCamera(pointer, camera)
@@ -183,6 +185,7 @@ export function mountRecordScene(host: HTMLElement, graph: RecordGraph, events: 
   intersectionObserver.observe(host)
   controls.addEventListener("change", requestDraw)
   canvas.addEventListener("pointerdown", onPointerDown)
+  canvas.addEventListener("pointermove", onPointerMove)
   canvas.addEventListener("pointerup", onPointerUp)
   canvas.addEventListener("pointercancel", onPointerCancel)
   canvas.addEventListener("pointerleave", onPointerCancel)
@@ -230,6 +233,7 @@ export function mountRecordScene(host: HTMLElement, graph: RecordGraph, events: 
     intersectionObserver.disconnect()
     document.removeEventListener("visibilitychange", onVisibility)
     canvas.removeEventListener("pointerdown", onPointerDown)
+    canvas.removeEventListener("pointermove", onPointerMove)
     canvas.removeEventListener("pointerup", onPointerUp)
     canvas.removeEventListener("pointercancel", onPointerCancel)
     canvas.removeEventListener("pointerleave", onPointerCancel)
@@ -239,6 +243,7 @@ export function mountRecordScene(host: HTMLElement, graph: RecordGraph, events: 
     if (lines) { lines.geometry.dispose(); (lines.material as THREE.Material).dispose() }
     for (const geometry of resources.geometries) geometry.dispose()
     for (const material of resources.materials) material.dispose()
+    if (!gl.isContextLost()) renderer.forceContextLoss()
     renderer.dispose()
     canvas.remove()
     host.dataset.webgl = "disposed"
