@@ -55,6 +55,6 @@ Include both Compose files when managing the named tunnel. Do not use `down`, re
 
 ## Return to the previous hostname
 
-Before stopping the old Quick Tunnel, restore the private runtime backup and recreate only the app. Stop only `tunnel-named` if necessary. Leave DNS and the named tunnel intact while diagnosing the failure.
+Before stopping the old Quick Tunnel, restore the private runtime backup. Set the demo Auth `site_url` and redirect allowlist to that same restored origin. Apply the Auth change by restarting only project `erp3d-public-20261023`, with the private keys, preserved volume, and loopback network described in [the backend guide](public-docker.md). Recreate only the app after its backend is healthy. Stop only `tunnel-named` if necessary. Leave DNS and the named tunnel intact while diagnosing the failure.
 
-If the old Quick Tunnel has already stopped, restarting it may issue a different URL. Read its current URL, update both runtime origins to match it, and recreate only the app. Preserve `supabase_db_erp3d-public-20261023` throughout recovery.
+If the old Quick Tunnel has already stopped, restarting it may issue a different URL. Read its current URL, update both runtime origins and the demo Auth site URL and redirect allowlist to match it, and apply the backend and app changes in that order. Preserve `supabase_db_erp3d-public-20261023` throughout recovery.
