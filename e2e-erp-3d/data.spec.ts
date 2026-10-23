@@ -1,4 +1,6 @@
-import { randomUUID } from "node:crypto"
+import { createHash, randomUUID } from "node:crypto"
+import { execFileSync } from "node:child_process"
+import { readFileSync, realpathSync } from "node:fs"
 import { createClient } from "@supabase/supabase-js"
 import { expect, test, type Page, type TestInfo } from "@playwright/test"
 import { loginDemo } from "../e2e/auth"
@@ -7,6 +9,15 @@ const api = process.env.NEXT_PUBLIC_SUPABASE_URL!
 const app = process.env.NEXT_PUBLIC_APP_URL!
 const admin = createClient(api, process.env.SUPABASE_SERVICE_ROLE_KEY!, { auth: { persistSession: false } })
 const seedOrg = "a0000000-0000-0000-0000-000000000001"
+
+function localSql(statement: string): string {
+  const isolation = JSON.parse(readFileSync(".local-stack/isolation.json", "utf8")) as { root: string; project: string; app: number; api: number; db: number }
+  const root = realpathSync(process.cwd())
+  const lane = isolation.app - 3100
+  const expectedProject = `erp-${createHash("sha256").update(root).digest("hex").slice(0, 10)}-${lane}`
+  if (isolation.root !== root || isolation.project !== expectedProject || isolation.api !== 55000 + lane * 100 + 1 || isolation.db !== isolation.api + 1 || app !== `http://127.0.0.1:${isolation.app}` || api !== `http://127.0.0.1:${isolation.api}`) throw new Error("SQL fixture requires this isolated worktree")
+  return execFileSync("psql", ["-h", "127.0.0.1", "-p", String(isolation.db), "-U", "postgres", "-d", "postgres", "-v", "ON_ERROR_STOP=1", "-Atc", statement], { env: { ...process.env, PGPASSWORD: "postgres" } }).toString().trim()
+}
 
 async function shot(page: Page, info: TestInfo, name: string) {
   if (new URL(page.url()).pathname === "/erp-3d") await expect(page.getByTestId("erp3d-root")).toBeVisible()
@@ -154,16 +165,61 @@ test("document reload gets a new observation interval", async ({ page }, info) =
   await shot(page, info, "data-refresh")
 })
 
-test("375px keyboard selection, Escape and reload remain usable", async ({ page }, info) => {
+test("one failed collection stays unavailable and recovers after permission restoration", async ({ page }, info) => {
+  await loginDemo(page)
+  const hadGrant = localSql("select exists(select 1 from information_schema.role_table_grants where table_schema='public' and table_name='projects' and grantee='authenticated' and privilege_type='SELECT')")
+  expect(hadGrant).toBe("t")
+  try {
+    localSql("revoke select on table public.projects from authenticated")
+    await page.goto("/erp-3d")
+    await expect(page.getByTestId("erp3d-project-unavailable")).toBeVisible()
+    await expect(page.getByTestId("erp3d-project-count")).toHaveText("Count unavailable")
+    await expect(page.getByTestId("erp3d-deal-count")).toContainText("displayed")
+    await selectFirst(page, "invoice")
+    await expect(page.getByTestId("erp3d-detail-parent")).toContainText("could not be checked")
+    await shot(page, info, "data-states")
+  } finally {
+    localSql("grant select on table public.projects to authenticated")
+  }
+  await page.getByTestId("erp3d-reload").click()
+  await expect(page.getByTestId("erp3d-project-count")).toHaveText("4 displayed / 4 total")
+})
+
+test("375px keyboard selection brings detail into view and returns focus", async ({ page }, info) => {
   await page.setViewportSize({ width: 375, height: 812 })
   await loginDemo(page)
   await page.goto("/erp-3d")
   const first = page.getByTestId("erp3d-deal-collection").locator("button").first()
+  const panel = page.getByRole("complementary", { name: "Selected record details" })
   await first.focus()
   await page.keyboard.press("Enter")
   await expect(page.getByTestId("erp3d-detail")).toBeVisible()
+  await expect(panel).toBeFocused()
+  const bounds = await panel.evaluate((element) => {
+    const rect = element.getBoundingClientRect()
+    return { top: rect.top, bottom: rect.bottom, height: window.innerHeight }
+  })
+  expect(bounds.top).toBeGreaterThanOrEqual(0)
+  expect(bounds.bottom).toBeLessThanOrEqual(bounds.height)
+  await shot(page, info, "data-accessibility-detail")
+  await page.keyboard.press("Tab")
+  await expect(page.getByRole("button", { name: "Close details" })).toBeFocused()
+  await page.keyboard.press("Tab")
+  await expect(page.getByTestId("erp3d-detail-link")).toBeFocused()
+  await page.keyboard.press("Enter")
+  await expect(page).toHaveURL(/\/deals\//)
+
+  await page.goto("/erp-3d")
+  await first.focus()
+  await page.keyboard.press("Enter")
+  await expect(panel).toBeFocused()
   await page.keyboard.press("Escape")
   await expect(page.getByTestId("erp3d-detail-empty")).toBeVisible()
+  await expect(first).toBeFocused()
+  await page.keyboard.press("Enter")
+  await expect(panel).toBeFocused()
+  await page.getByRole("button", { name: "Close details" }).click()
+  await expect(first).toBeFocused()
   const width = await page.evaluate(() => ({ page: document.documentElement.scrollWidth, viewport: window.innerWidth }))
   expect(width.page).toBeLessThanOrEqual(width.viewport)
   await shot(page, info, "data-accessibility")

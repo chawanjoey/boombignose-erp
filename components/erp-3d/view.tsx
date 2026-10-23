@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useMemo, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import { ArrowUpRight, Database, RefreshCw, X } from "lucide-react"
 import { buildRecordGraph, recordHref, recordLabel, type ParentRelation } from "@/lib/erp-3d/graph"
 import type { ErpRecord, ErpSnapshot, RecordKey, RecordKind } from "@/lib/erp-3d/model"
@@ -36,14 +36,34 @@ export function Erp3dView({ snapshot }: { snapshot: ErpSnapshot }) {
   const graph = useMemo(() => buildRecordGraph(snapshot), [snapshot])
   const [selectedKey, setSelectedKey] = useState<RecordKey | null>(null)
   const selected = selectedKey ? graph.byKey.get(selectedKey) : undefined
+  const originRef = useRef<HTMLButtonElement | null>(null)
+  const detailRef = useRef<HTMLElement | null>(null)
+
+  function focusDetail() {
+    const detail = detailRef.current
+    detail?.focus({ preventScroll: true })
+    detail?.scrollIntoView({ block: "nearest", behavior: "auto" })
+  }
+
+  function closeDetail() {
+    setSelectedKey(null)
+    originRef.current?.focus()
+  }
+
+  useEffect(() => {
+    if (selectedKey) focusDetail()
+  }, [selectedKey])
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") setSelectedKey(null)
+      if (event.key === "Escape" && selectedKey) {
+        event.preventDefault()
+        closeDetail()
+      }
     }
     window.addEventListener("keydown", onKeyDown)
     return () => window.removeEventListener("keydown", onKeyDown)
-  }, [])
+  }, [selectedKey])
 
   return (
     <main data-testid="erp3d-root" data-scope={snapshot.scope.key} className="mx-auto w-full min-w-0 max-w-7xl space-y-6 overflow-x-hidden pb-10">
@@ -84,7 +104,7 @@ export function Erp3dView({ snapshot }: { snapshot: ErpSnapshot }) {
                     <ul className="divide-y">
                       {collection.records.map((record) => (
                         <li key={record.key}>
-                          <button type="button" data-testid={`erp3d-record-${record.key}`} aria-pressed={selectedKey === record.key} onClick={() => setSelectedKey(record.key)} className="flex w-full min-w-0 items-center justify-between gap-3 px-4 py-3 text-left transition hover:bg-accent/60 focus-visible:bg-accent focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-ring aria-pressed:bg-accent sm:px-5">
+                          <button type="button" data-testid={`erp3d-record-${record.key}`} aria-pressed={selectedKey === record.key} onClick={(event) => { originRef.current = event.currentTarget; setSelectedKey(record.key); if (selectedKey === record.key) focusDetail() }} className="flex w-full min-w-0 items-center justify-between gap-3 px-4 py-3 text-left transition hover:bg-accent/60 focus-visible:bg-accent focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-ring aria-pressed:bg-accent sm:px-5">
                             <span className="min-w-0"><span className="block font-mono text-sm font-medium">{recordLabel(record)}</span><span className="mt-0.5 block text-xs capitalize text-muted-foreground">{readable(record.status)}</span></span>
                             <span className="shrink-0 rounded-full border px-2 py-1 text-xs text-muted-foreground">View details</span>
                           </button>
@@ -98,10 +118,10 @@ export function Erp3dView({ snapshot }: { snapshot: ErpSnapshot }) {
           })}
         </div>
 
-        <aside className="min-w-0 lg:sticky lg:top-20 lg:self-start" aria-label="Selected record">
+        <aside ref={detailRef} tabIndex={selected ? -1 : undefined} className="min-w-0 focus-visible:rounded-2xl focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring lg:sticky lg:top-20 lg:self-start" aria-label="Selected record details">
           {selected ? (
             <div data-testid="erp3d-detail" className="rounded-2xl border bg-card p-5 shadow-sm">
-              <div className="flex items-start justify-between gap-3"><div><p className="text-xs uppercase tracking-wider text-muted-foreground">Selected record</p><h2 className="mt-1 break-all font-mono text-lg font-semibold">{recordLabel(selected)}</h2></div><button type="button" aria-label="Close details" onClick={() => setSelectedKey(null)} className="rounded-md p-2 hover:bg-accent focus-visible:outline-2 focus-visible:outline-ring"><X className="size-4" /></button></div>
+              <div className="flex items-start justify-between gap-3"><div><p className="text-xs uppercase tracking-wider text-muted-foreground">Selected record</p><h2 className="mt-1 break-all font-mono text-lg font-semibold">{recordLabel(selected)}</h2></div><button type="button" aria-label="Close details" onClick={closeDetail} className="rounded-md p-2 hover:bg-accent focus-visible:outline-2 focus-visible:outline-ring"><X className="size-4" /></button></div>
               <dl className="mt-5 space-y-3 text-sm">
                 <div><dt className="text-xs text-muted-foreground">Record ID</dt><dd data-testid="erp3d-detail-id" className="break-all font-mono text-xs">{selected.id}</dd></div>
                 <div><dt className="text-xs text-muted-foreground">Stored status</dt><dd data-testid="erp3d-detail-status" className="capitalize">{readable(selected.status)}</dd></div>
