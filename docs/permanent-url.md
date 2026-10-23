@@ -35,7 +35,7 @@ Wait until the new tunnel is healthy. Verify that `https://<hostname>/healthz` r
 
 1. Make a mode 600 backup of `.local-stack/runtime.env`.
 2. Set `NEXT_PUBLIC_APP_URL=https://<hostname>` and `NEXT_PUBLIC_SUPABASE_URL=https://<hostname>/supabase` in that file. Browser and server must use the same Supabase URL.
-3. Check the public demo's Auth `site_url` and redirect allowlist. If they contain the old origin, update only that backend's settings. Do not restart another Supabase project.
+3. Check the public demo's Auth `site_url` and redirect allowlist. If they contain the old origin, update that backend's settings and restart only project `erp3d-public-20261023` with its private keys, preserved volume, and loopback network as described in [the backend guide](public-docker.md). Wait until Auth is healthy before recreating the app. Do not restart another Supabase project.
 4. Recreate only the app.
 
 ```sh
