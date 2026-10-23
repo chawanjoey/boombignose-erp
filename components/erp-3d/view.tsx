@@ -57,7 +57,7 @@ export function Erp3dView({ snapshot }: { snapshot: ErpSnapshot }) {
       </div>
 
       <section aria-label="Snapshot information" className="grid gap-3 rounded-2xl border bg-card p-4 text-sm shadow-sm sm:grid-cols-2 lg:grid-cols-3">
-        <div><span className="block text-xs text-muted-foreground">Authorized workspace</span><span data-testid="erp3d-scope" className="font-mono text-xs break-all">{snapshot.scope.orgId}<span className="whitespace-nowrap"> · {snapshot.scope.role}</span></span></div>
+        <div><span className="block text-xs text-muted-foreground">Authorized workspace</span><span data-testid="erp3d-scope" className="font-mono text-xs break-words">{snapshot.scope.orgId}<span className="whitespace-nowrap"> · {snapshot.scope.role}</span></span></div>
         <div><span className="block text-xs text-muted-foreground">Observed</span><time data-testid="erp3d-requested" dateTime={snapshot.requestedAt}>{snapshot.requestedAt}</time><span className="block text-xs text-muted-foreground">through {snapshot.completedAt}</span></div>
         <div><span className="block text-xs text-muted-foreground">Coverage</span><span data-testid="erp3d-coverage">{graph.nodes.length} displayed records · {graph.edges.length} loaded relations</span><span className="block text-xs text-muted-foreground">Four independent queries, not one atomic database snapshot.</span></div>
       </section>
